@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chat Options</title>
+  <link rel="stylesheet" href="styles/Form.css" />
+</head>
+<body>
+  <div class="options-container">
+    <h2>Talk to Your AI Avatar</h2>
+    <img
+      src="https://play-lh.googleusercontent.com/7Ak4Ye7wNUtheIvSKnVgGL_OIZWjGPZNV6TP_3XLxHC-sDHLSE45aDg41dFNmL5COA=w240-h480-rw"
+      alt="AI Avatar"
+    />
+    <div class="button-container">
+      <button id="textButton">Text</button>
+      <button id="videoButton">Video</button>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('textButton').addEventListener('click', () => {
+      window.location.href = 'Home.html';
+    });
+    document.getElementById('videoButton').addEventListener('click', () => {
+      window.location.href = 'mp3.html';
+    });
+  </script>
+</body>
+</html>

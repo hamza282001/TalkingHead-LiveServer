@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Talking Head with Voice Chat</title>
+  <style>
+    /* Styles for the TalkingHead avatar and file controls */
+    body, html {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background-color: #202020;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+    #avatar {
+      display: block;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 40%;
+      bottom: 0;
+    }
+    #controls {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      position: absolute;
+      top: 50px;
+      left: calc(60% + 50px);
+      right: 50px;
+      bottom: 50px;
+    }
+    #load, #play {
+      font-size: 20px;
+    }
+    #json {
+      flex: 1;
+      background-color: lightgray;
+      font-size: 20px;
+      resize: none;
+    }
+    #loading {
+      display: block;
+      position: absolute;
+      top: 50px;
+      left: 50px;
+      width: 200px;
+      font-size: 20px;
+    }
+
+    /* Styles for the voice chat (microphone button and chat box) */
+    #chat-container {
+      position: absolute;
+      bottom: 10px;
+      left: calc(60% + 50px);
+      right: 50px;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 10px;
+      border-radius: 8px;
+      max-height: 40%;
+      overflow-y: auto;
+    }
+    #mic-button {
+      background: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 60px;
+      height: 60px;
+      font-size: 30px;
+      cursor: pointer;
+      margin-bottom: 10px;
+    }
+    #mic-button.listening {
+      background: #FF4136;
+    }
+    #chat-box {
+      max-height: 300px;
+      overflow-y: auto;
+      font-size: 16px;
+    }
+    .message {
+      margin-bottom: 5px;
+      padding: 5px;
+      border-radius: 4px;
+    }
+    .user {
+      background-color: #004085;
+      text-align: right;
+    }
+    .assistant {
+      background-color: #383d41;
+      text-align: left;
+    }
+  </style>
+
+  <!-- Import TalkingHead and its dependencies -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js/+esm",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+      "talkinghead": "https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.3/modules/talkinghead.mjs"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import { TalkingHead } from "talkinghead";
+
+    // -------------------------------
+    // TalkingHead and File-Upload Code
+    // -------------------------------
+    let head;    // TalkingHead instance
+    let audio;   // Audio object
+
+    // We'll store the assistant's response text for generating approximate timings.
+    let lastResponseText = "";
+
+    // Create the TalkingHead avatar instance and load the 3D model
+    async function initAvatar() {
+      const nodeAvatar = document.getElementById('avatar');
+      head = new TalkingHead( nodeAvatar, {
+        ttsEndpoint: "https://eu-texttospeech.googleapis.com/v1beta1/text:synthesize",
+        lipsyncModules: ["en", "fi"],
+        cameraView: "head"
+      });
+
+      const nodeLoading = document.getElementById('loading');
+      try {
+        await head.showAvatar({
+          url: 'https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb?morphTargets=ARKit,Oculus+Visemes,mouthOpen,mouthSmile,eyesClosed,eyesLookUp,eyesLookDown&textureSizeLimit=1024&textureFormat=png',
+          body: 'F',
+          avatarMood: 'neutral',
+          lipsyncLang: 'en'
+        }, (ev) => {
+          if (ev.lengthComputable) {
+            let val = Math.min(100, Math.round(ev.loaded / ev.total * 100));
+            //nodeLoading.textContent = "Loading " + val + "%";
+            nodeLoading.textContent = "Connecting";
+          }
+        });
+        nodeLoading.style.display = 'none';
+      } catch (error) {
+        console.error(error);
+        nodeLoading.textContent = error.toString();
+      }
+    }
+
+    // Function to send an audio file to the OpenAI Whisper API and process the response
+    async function loadAudio(file) {
+      try {
+        const nodeJSON = document.getElementById('json');
+        nodeJSON.value = "Please wait...";
+
+        const nodePlay = document.getElementById('play');
+        nodePlay.disabled = true;
+
+        const form = new FormData();
+        form.append("file", file);
+        form.append("model", "whisper-1");
+        form.append("language", "en");
+        form.append("response_format", "verbose_json");
+        form.append("prompt", "[The following is a full verbatim transcription without additional details, comments or emojis:]");
+        form.append("timestamp_granularities[]", "word");
+        form.append("timestamp_granularities[]", "segment");
+
+        // IMPORTANT: Replace the API key with your own.
+        const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+          method: "POST",
+          body: form,
+          headers: {
+            "Authorization": "Bearer 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"
+          }
+        });
+
+        if (response.ok) {
+          const json = await response.json();
+          nodeJSON.value = JSON.stringify(json, null, 4);
+
+          if (json.words && json.words.length) {
+            const reader = new FileReader();
+            reader.readAsArrayBuffer(file);
+            reader.onload = async (readerEvent) => {
+              let arraybuffer = readerEvent.target.result;
+              let audiobuffer = await head.audioCtx.decodeAudioData(arraybuffer);
+
+              // Prepare the audio object for TalkingHead (from file upload)
+              audio = {
+                audio: audiobuffer,
+                words: [],
+                wtimes: [],
+                wdurations: [],
+                markers: [],
+                mtimes: []
+              };
+
+              json.words.forEach(x => {
+                audio.words.push(x.word);
+                audio.wtimes.push(1000 * x.start - 150);
+                audio.wdurations.push(1000 * (x.end - x.start));
+              });
+
+              // A callback to make the avatar look at the camera during speech segments
+              const startSegment = async () => {
+                head.lookAtCamera(500);
+                head.speakWithHands();
+              };
+
+              json.segments.forEach(x => {
+                if (x.start > 2 && x.text.length > 10) {
+                  audio.markers.push(startSegment);
+                  audio.mtimes.push(1000 * x.start - 1000);
+                }
+              });
+
+              nodePlay.disabled = false;
+            };
+          }
+        } else {
+          nodeJSON.value = 'Error: ' + response.status + ' ' + response.statusText;
+          console.error(response);
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    // -------------------------------
+    // Voice Chat Code (Speech Recognition & Chat API)
+    // -------------------------------
+
+    // State variables for the voice chat
+    let isListening = false;
+    let transcript = "";
+    let messages = [
+      {
+        role: "system",
+        content: "You are a helpful assistant. Respond briefly and concisely, as if you're on a phone call."
+      }
+    ];
+
+    // Update the chat box with current messages
+    function updateChatBox() {
+      const chatBox = document.getElementById('chat-box');
+      chatBox.innerHTML = "";
+      messages.forEach(msg => {
+        const div = document.createElement('div');
+        div.className = "message " + (msg.role === "user" ? "user" : "assistant");
+        div.textContent = msg.content;
+        chatBox.appendChild(div);
+      });
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // Use the browser's SpeechRecognition API (webkit prefix fallback)
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition;
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event) => {
+        transcript = "";
+        for (const res of event.results) {
+          transcript += res[0].transcript;
+        }
+      };
+
+      recognition.onend = () => {
+        if (isListening) {
+          // Process the spoken input if any text was captured
+          if (transcript.trim()) {
+            processUserInput(transcript.trim());
+          } else {
+            // Restart listening if no transcript was captured
+            startListening();
+          }
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.error("Speech recognition error", event.error);
+        isListening = false;
+        document.getElementById('mic-button').classList.remove('listening');
+      };
+    } else {
+      alert("Your browser does not support speech recognition.");
+    }
+
+    // Start listening for user speech
+    function startListening() {
+      if (!recognition) return;
+      isListening = true;
+      document.getElementById('mic-button').classList.add('listening');
+      transcript = "";
+      recognition.start();
+    }
+
+    // Stop listening (if needed)
+    function stopListening() {
+      if (!recognition) return;
+      isListening = false;
+      document.getElementById('mic-button').classList.remove('listening');
+      recognition.stop();
+    }
+
+    // Process the user's spoken input and call the Chat API
+    async function processUserInput(userText) {
+      // Add the user message to the conversation
+      messages.push({ role: "user", content: userText });
+      updateChatBox();
+
+      // Call the ChatGPT API
+      try {
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer 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" // Replace with your Chat API key
+          },
+          body: JSON.stringify({
+            model: "gpt-3.5-turbo",
+            messages: messages,
+            temperature: 0.7
+          })
+        });
+
+        const data = await response.json();
+        const assistantMessage = data.choices && data.choices[0]?.message?.content.trim();
+        if (assistantMessage) {
+          messages.push({ role: "assistant", content: assistantMessage });
+          updateChatBox();
+
+          // Save the assistant's text globally to use for approximating timings.
+          lastResponseText = assistantMessage;
+
+          // Instead of speaking the response directly, generate and save an MP3 file.
+          await generateAndSaveTTS(assistantMessage);
+        }
+      } catch (error) {
+        console.error("Error fetching OpenAI response:", error);
+      }
+    }
+
+    /**
+     * generateAndSaveTTS:
+     * Sends the assistant's response text to the server-side endpoint to generate
+     * an MP3 file (response.mp3). Once generated, we automatically load that file,
+     * simulating the file input selection.
+     */
+    async function generateAndSaveTTS(text) {
+      try {
+        // Change the URL below to match your server’s location.
+        const ttsResponse = await fetch("https://talking-head-flask-server.vercel.app/generate-tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text, filename: "response.mp3" })
+        });
+        if (ttsResponse.ok) {
+          console.log("MP3 file generated and saved as response.mp3");
+        } else {
+          console.error("Error generating TTS mp3 file: " + ttsResponse.statusText);
+        }
+      } catch (error) {
+        console.error("Error in generateAndSaveTTS:", error);
+      } finally {
+        // Instead of simply starting to listen again,
+        // fetch and load the generated MP3 as if the user had selected it.
+        await loadGeneratedAudio();
+      }
+    }
+
+    /**
+     * loadGeneratedAudio:
+     * Fetches the generated MP3 file from the server, decodes it,
+     * builds an audio object with approximate word timings and markers,
+     * enables the Play button, and then automatically plays the audio via TalkingHead.
+     * Once playback is complete (approximated by a timeout based on duration),
+     * the listening process is started again.
+     */
+    async function loadGeneratedAudio() {
+      try {
+        // Fetch the generated file; adjust URL/path as needed.
+        const res = await fetch("https://talking-head-flask-server.vercel.app/response.mp3");
+        if (!res.ok) throw new Error("Failed to fetch generated MP3");
+        const arrayBuffer = await res.arrayBuffer();
+        const audiobuffer = await head.audioCtx.decodeAudioData(arrayBuffer);
+
+        // Build a fake audio object with word timings based on the assistant text.
+        const words = lastResponseText.split(/\s+/);
+        const numWords = words.length;
+        const totalDuration = audiobuffer.duration; // in seconds
+        const scaledDuration = totalDuration * 0.95; // For example, reduce by 5%
+        const approxWordDuration = (scaledDuration / numWords) * 1000;
+        
+
+        // Create the audio object
+        audio = {
+          audio: audiobuffer,
+          words: words,
+          wtimes: [],
+          wdurations: [],
+          markers: [],
+          mtimes: []
+        };
+
+        // Approximate word timings
+        for (let i = 0; i < numWords; i++) {
+          audio.wtimes.push(i * approxWordDuration);
+          // Set each word duration to 80% of the interval (adjust as needed)
+          audio.wdurations.push(approxWordDuration * 0.6);
+        }
+
+        // (Optional) Create marker callbacks (for example, every 3 words)
+        const markerCallback = async () => {
+          head.lookAtCamera(500);
+          head.speakWithHands();
+        };
+        for (let i = 0; i < numWords; i += 5) {
+          audio.markers.push(markerCallback);
+          audio.mtimes.push(i * approxWordDuration);
+        }
+
+        // Enable the Play button (as if the user had chosen this file)
+        document.getElementById("play").disabled = false;
+
+        // Auto-play the generated audio (with approximate lip sync)
+        head.speakAudio(audio);
+
+        // When playback is expected to be complete, resume listening.
+        setTimeout(() => {
+          startListening();
+        }, totalDuration * 1000);
+      } catch (err) {
+        console.error("Error loading generated audio:", err);
+        // In case of error, resume listening anyway.
+        startListening();
+      }
+    }
+
+    // Toggle voice chat on mic button click.
+    function toggleVoiceChat() {
+      if (isListening) {
+        // Stop conversation: reset messages and stop recognition
+        stopListening();
+        messages = [{
+          role: "system",
+          content: "You are a helpful assistant. Respond briefly and concisely, as if you're on a phone call."
+        }];
+        updateChatBox();
+      } else {
+        startListening();
+      }
+    }
+
+    // -------------------------------
+    // DOMContentLoaded: Set up event listeners and initialize components
+    // -------------------------------
+    document.addEventListener('DOMContentLoaded', async function(e) {
+      // Initialize TalkingHead avatar
+      await initAvatar();
+
+      // File input event for uploading an audio file (Whisper API)
+      document.getElementById('load').addEventListener('change', function(ev) {
+        const file = ev.target.files[0];
+        if (file) loadAudio(file);
+      });
+
+      // Play button to speak the processed audio file.
+      document.getElementById('play').addEventListener('click', function() {
+        if (audio) {
+          head.speakAudio(audio);
+        }
+      });
+
+      // Toggle the voice chat when the microphone button is clicked.
+      document.getElementById('mic-button').addEventListener('click', toggleVoiceChat);
+
+      // Pause TalkingHead animation when the document is hidden
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "visible") {
+          head.start();
+        } else {
+          head.stop();
+        }
+      });
+    });
+  </script>
+</head>
+<body>
+  <!-- TalkingHead avatar and file controls -->
+  <div id="avatar"></div>
+  <div id="controls" style="display: none;">
+    <input id="load" type="file" accept=".m4a,.mp3,.webm,.mp4,.mpga,.wav,.mpeg">
+    <textarea id="json" readonly></textarea>
+    <input id="play" type="button" value="Play" disabled>
+  </div>
+  <div id="loading"></div>
+
+  <!-- Voice Chat UI -->
+  <div id="chat-container">
+    <button id="mic-button">🎤</button>
+    <div id="chat-box"></div>
+  </div>
+</body>
+</html>
