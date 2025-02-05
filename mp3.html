@@ -168,11 +168,12 @@
         form.append("timestamp_granularities[]", "segment");
 
         // IMPORTANT: Replace the API key with your own.
+        console.log(secrets.API_KEY);
         const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
           method: "POST",
           body: form,
           headers: {
-            "Authorization": "Bearer ${secrets.API_KEY}"
+            "Authorization": "Bearer ${{secrets.API_KEY}}"
           }
         });
 
