@@ -172,7 +172,7 @@
           method: "POST",
           body: form,
           headers: {
-            "Authorization": "Bearer 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"
+            "Authorization": "Bearer ${secrets.API_KEY}"
           }
         });
 
@@ -321,7 +321,7 @@
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": "Bearer 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" // Replace with your Chat API key
+            "Authorization": "Bearer ${secrets.API_KEY}" // Replace with your Chat API key
           },
           body: JSON.stringify({
             model: "gpt-3.5-turbo",
